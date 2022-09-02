@@ -133,7 +133,7 @@ http {
 			}
 
 			alias /etc/nginx/test/broadcast/hls;
-			
+			add_header Access-Control-Allow-Origin *;
 			add_header Cache-Control no-cache;
 		}
 
@@ -265,7 +265,190 @@ ffplay "http://public_ip_of_rtmp_server/hls/live.m3u8" # 同样要替换成rtmp�
 ---
 
 ## 第二种RTMP
+和上面的方法基本一样
+只有nginx.conf需要稍微修改一下
+```apacheconf
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+include /etc/nginx/modules-enabled/*.conf;
 
+events {
+	worker_connections 768;
+	# multi_accept on;
+}
+
+
+rtmp {                #RTMP服务
+    server {
+        listen 1935;  #//服务端口 
+	    chunk_size 4096;   #//数据传输块的大小
+        
+        application vidz {
+            play /etc/nginx/test/vids; #//视频文件存放位置。
+			live on;
+			record off;
+        }
+
+		# hls 推流 # hls 的实测延迟非常高
+		application hls {
+			live on;
+			hls on;
+			hls_path /etc/nginx/test/broadcast/hls;
+		}
+
+		# 使用rtmp协议
+        # 这部分就直接实现了rtmp协议直播而没有使用hls 这样子延迟非常低
+		application live {
+			live on;
+		}
+    }
+}
+
+
+
+http {
+
+	##
+	# Basic Settings
+	##
+
+	sendfile on;
+	tcp_nopush on;
+	types_hash_max_size 2048;
+	# server_tokens off;
+
+	# server_names_hash_bucket_size 64;
+	# server_name_in_redirect off;
+
+	include /etc/nginx/mime.types;
+	default_type application/octet-stream;
+
+	##
+	# SSL Settings
+	##
+
+	ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3; # Dropping SSLv3, ref: POODLE
+	ssl_prefer_server_ciphers on;
+
+	##
+	# Logging Settings
+	##
+
+	access_log /var/log/nginx/access.log;
+	error_log /var/log/nginx/error.log;
+
+	##
+	# Gzip Settings
+	##
+
+	gzip on;
+
+	# gzip_vary on;
+	# gzip_proxied any;
+	# gzip_comp_level 6;
+	# gzip_buffers 16 8k;
+	# gzip_http_version 1.1;
+	# gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+
+	keepalive_timeout  65;
+    server {
+        listen       80;
+        server_name  localhost;
+
+        #charset koi8-r;
+
+        #access_log  logs/host.access.log  main;
+
+        location / {
+            root   /etc/nginx/test;
+            index  index.html index.htm;
+            autoindex on;
+            # autoindex_exact_size off;            
+        }
+
+        location /images {
+            # root path 是拼接形式 也就是 path+location 后面的route path 才是真正的path
+            # alias path 不需要拼接
+            # alias /usr/local/var/ui; 
+            root /etc/nginx/test/;
+            # add_header  Cache-control "public";
+            # access_log  off;
+            # expires 90d;
+            autoindex on;
+            # autoindex_exact_size off;
+        }
+
+		# 拉流
+		location /hls {
+			types {
+				application/vnd.apple.mpegurl m3u8;
+				# application/dash+xml mpd;
+				video/mp2t ts;
+			}
+
+			alias /etc/nginx/test/broadcast/hls;
+			add_header Access-Control-Allow-Origin *;
+			add_header Cache-Control no-cache;
+		}
+
+		# location /rtmp {
+		# 	rtmp_stat all;
+		# 	rtmp_stat_stylesheet stat.xsl;
+		# }
+
+		# location /stat.xsl {
+		# 	root /usr/lib/nginx/modules/ngx_rtmp_module.so
+		# }
+
+
+        error_page   500 502 503 504  /50x.html;
+        location = /50x.html {
+            root   /etc/nginx/test/;
+        }
+    }
+
+
+	##
+	# Virtual Host Configs
+	##
+
+	include /etc/nginx/conf.d/*.conf;
+	# include /etc/nginx/sites-enabled/*;
+}
+
+
+#mail {
+#	# See sample authentication script at:
+#	# http://wiki.nginx.org/ImapAuthenticateWithApachePhpScript
+#
+#	# auth_http localhost/auth.php;
+#	# pop3_capabilities "TOP" "USER";
+#	# imap_capabilities "IMAP4rev1" "UIDPLUS";
+#
+#	server {
+#		listen     localhost:110;
+#		protocol   pop3;
+#		proxy      on;
+#	}
+#
+#	server {
+#		listen     localhost:143;
+#		protocol   imap;
+#		proxy      on;
+#	}
+#}
+
+```
+推流时使用也几乎一样
+```bash
+ffmpeg -f avfoundation -r 30 -i "0:0"  -c:v h264 -c:a aac -preset ultrafast -tune zerolatency -s 1280x720 -f flv rtmp://public_ip_of_rtmp_server/live/test # 因为注册了rtmp application "live" 所以是live/_ 最后test可以随便写同样的会影响拉流的url
+```
+拉流ffmpeg为例
+```bash
+ffplay "rtmp://public_ip_of_rtmp_server/live/test"
+```
 
 ---
 主要参考的文档是 [hls搭建直播系统](https://blog.51cto.com/u_15024210/3016794), [rtmp直播系统](https://blog.csdn.net/kingroc/article/details/50839994), [rtmp-en](https://www.stackovercloud.com/2022/01/07/how-to-set-up-a-video-streaming-server-using-nginx-rtmp-on-ubuntu-20-04/)
